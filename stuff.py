@@ -20,18 +20,34 @@ class Delta0:
     truth: Callable[[], bool] = lambda: None
 
     def __or__(self, other: Delta0) -> Delta0:
+        if self == Delta0.true() or other == Delta0.true():
+            return Delta0.true()
+        if self == Delta0.false():
+            return other
+        if other == Delta0.false():
+            return self
         return Delta0(
             repr=f"({self.repr}) | ({other.repr})",
             truth=lambda: self.truth() or other.truth(),
         )
 
     def __and__(self, other: Delta0) -> Delta0:
+        if self == Delta0.false() or other == Delta0.false():
+            return Delta0.false()
+        if self == Delta0.true():
+            return other
+        if other == Delta0.true():
+            return self
         return Delta0(
             repr=f"({self.repr}) & ({other.repr})",
             truth=lambda: self.truth() and other.truth(),
         )
 
     def __invert__(self) -> Delta0:
+        if self == Delta0.true():
+            return Delta0.false()
+        if self == Delta0.false():
+            return Delta0.true()
         return Delta0(
             repr=f"~({self.repr})",
             truth=lambda: not self.truth(),
@@ -39,7 +55,17 @@ class Delta0:
         
     def __repr__(self) -> str:
         return self.repr
+    
+    @classmethod
+    def true(cls) -> Delta0:
+        return cls(repr="True", truth=lambda: True)
+    
+    @classmethod
+    def false(cls) -> Delta0:
+        return cls(repr="False", truth=lambda: False)
 
+    def __eq__(self, other: Any) -> bool:
+        return self.repr == other.repr and self.truth() == other.truth()
 
 class FOL:
 
@@ -70,6 +96,12 @@ class FOL:
         return cls(quantifier="∀", fol_sequence=FOL_sequence(**kwargs))
 
     def __or__(self, other: FOL) -> FOL:
+        if self == FOL.true() or other == FOL.true():
+            return FOL.true()
+        if self == FOL.false():
+            return other
+        if other == FOL.false():
+            return self
         if self.quantifier is not None:
             return FOL(
                 quantifier=self.quantifier,
@@ -81,6 +113,12 @@ class FOL:
             return FOL(delta=self.delta | other.delta)
 
     def __and__(self, other: FOL) -> FOL:
+        if self == FOL.false() or other == FOL.false():
+            return FOL.false()
+        if self == FOL.true():
+            return other
+        if other == FOL.true():
+            return self
         if self.quantifier is not None:
             return FOL(
                 quantifier=self.quantifier,
@@ -92,6 +130,10 @@ class FOL:
             return FOL(delta=self.delta & other.delta)
 
     def __invert__(self) -> FOL:
+        if self == FOL.true():
+            return FOL.false()
+        if self == FOL.false():
+            return FOL.true()
         if self.quantifier is not None:
             return FOL(
                 quantifier=("∃" if self.quantifier == "∀" else "∀"),
@@ -103,58 +145,63 @@ class FOL:
     def __repr__(self) -> str:
         if self.quantifier is not None:
             x = SYMBOL()
-            return f"{self.quantifier}{x} ∈ {self.space}. {self.fol_sequence._repr(x)}"
+            return f"{self.quantifier} ({x} : {self.space}), {self(x)}"
         else:
             return self.delta.repr
 
-    def subst(self, x: "Self.space"):
+    @classmethod
+    def true(cls) -> FOL:
+        return cls(delta=Delta0.true())
+    
+    @classmethod
+    def false(cls) -> FOL:
+        return cls(delta=Delta0.false())
+
+    def __call__(self, x: "Self.space"):
         return self.fol_sequence(x) if self.quantifier is not None else self.delta.truth()
 
-    def play(self, xs: list["Self.space"]) -> bool:
+    def play(self, xs: list["Self.space"]) -> FOL:
         if self.quantifier == "∃":
-            return any(self.subst(x) for x in xs)
+            res = FOL.false()
+            for x in xs:
+                res |= self(x)
+            return res
         elif self.quantifier == "∀":
-            return all(self.subst(x) for x in xs)
+            res = FOL.true()
+            for x in xs:
+                res &= self(x)
+            return res
         elif self.delta is not None:
             return self.delta.truth()
         else:
             raise ValueError("Invalid FOL sentence")
+        
+    def __eq__(self, other: Any) -> bool:
+        return self.quantifier == other.quantifier and self.fol_sequence == other.fol_sequence and self.delta == other.delta
 
 
 @dataclass
 class FOL_sequence:
 
     sequence: Callable[["Self.space"], FOL]
-    repr: str # string with placeholder {x}
     space: Type = int
-
-    def _repr(self, x: str = None) -> str:
-        if x is None:
-            x = SYMBOL()
-        return self.repr.format(x=x)
-    
-    def __repr__(self) -> str:
-        return self._repr() 
-    
+        
     def __or__(self, other: FOL) -> FOL_sequence:
         return FOL_sequence(
             space=self.space,
             sequence=lambda x: self.sequence(x) | other,
-            repr=f"({self.repr}) | ({other})",
         )
     
     def __and__(self, other: FOL) -> FOL_sequence:
         return FOL_sequence(
             space=self.space,
             sequence=lambda x: self.sequence(x) & other,
-            repr=f"({self.repr}) & ({other})",
         )
     
     def __invert__(self) -> FOL_sequence:
         return FOL_sequence(
             space=self.space,
             sequence=lambda x: ~self.sequence(x),
-            repr=f"~({self.repr})",
         )
     
     def __call__(self, x: "Self.space") -> FOL:
